@@ -12,9 +12,9 @@
 //! Traits and structs for configuring and loading boot parameters on `x86_64` using the Linux
 //! boot protocol.
 
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{ByteValued, Bytes, GuestMemory};
 
-use super::super::{BootConfigurator, Error as BootConfiguratorError, Result};
+use crate::configurator::{BootConfigurator, BootParams, Error as BootConfiguratorError, Result};
 use crate::loader::bootparam::boot_params;
 
 use std::error::Error as StdError;
@@ -64,28 +64,25 @@ impl BootConfigurator for LinuxBootConfigurator {
     ///
     /// # Arguments
     ///
-    /// * `header` - boot parameters encapsulated in a [`boot_params`] struct.
-    /// * `sections` - unused.
+    /// * `params` - boot parameters. The header contains a [`boot_params`] struct. The `sections`
+    ///              and `modules` are unused.
     /// * `guest_memory` - guest's physical memory.
     ///
-    /// [`boot_params`]: ../loader/bootparam/struct.boot_e820_entry.html
-    fn write_bootparams<T, S, M>(
-        header: (T, GuestAddress),
-        _sections: Option<(Vec<S>, GuestAddress)>,
-        guest_memory: &M,
-    ) -> Result<()>
+    /// [`boot_params`]: ../loader/bootparam/struct.boot_params.html
+    fn write_bootparams<T, S, R, M>(params: BootParams<T, S, R>, guest_memory: &M) -> Result<()>
     where
         T: ByteValued,
         S: ByteValued,
+        R: ByteValued,
         M: GuestMemory,
     {
         // The VMM has filled a `boot_params` struct and its e820 map.
         // This will be written in guest memory at the zero page.
         guest_memory
-            .checked_offset(header.1, mem::size_of::<boot_params>())
+            .checked_offset(params.header.address, mem::size_of::<boot_params>())
             .ok_or(Error::ZeroPagePastRamEnd)?;
         guest_memory
-            .write_obj(header.0, header.1)
+            .write_obj(params.header.header, params.header.address)
             .map_err(|_| Error::ZeroPageSetup)?;
 
         Ok(())
@@ -131,9 +128,13 @@ mod tests {
             guest_memory.last_addr().raw_value() - mem::size_of::<boot_params>() as u64 + 1,
         );
         assert_eq!(
-            LinuxBootConfigurator::write_bootparams::<boot_params, boot_params, GuestMemoryMmap>(
-                (params, bad_zeropg_addr),
-                None,
+            LinuxBootConfigurator::write_bootparams::<
+                boot_params,
+                boot_params,
+                boot_params,
+                GuestMemoryMmap,
+            >(
+                BootParams::new(params, bad_zeropg_addr, None, None),
                 &guest_memory,
             )
             .err(),
@@ -141,13 +142,15 @@ mod tests {
         );
 
         // Success case.
-        assert!(
-            LinuxBootConfigurator::write_bootparams::<boot_params, boot_params, GuestMemoryMmap>(
-                (params, zero_page_addr),
-                None,
-                &guest_memory
-            )
-            .is_ok()
-        );
+        assert!(LinuxBootConfigurator::write_bootparams::<
+            boot_params,
+            boot_params,
+            boot_params,
+            GuestMemoryMmap,
+        >(
+            BootParams::new(params, zero_page_addr, None, None),
+            &guest_memory,
+        )
+        .is_ok());
     }
 }

@@ -12,10 +12,10 @@
 //! Traits and structs for configuring and loading boot parameters on `x86_64` using the PVH boot
 //! protocol.
 
-use vm_memory::{Address, ByteValued, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{Address, ByteValued, Bytes, GuestMemory};
 
-use super::super::{BootConfigurator, Error as BootConfiguratorError, Result};
-use crate::loader::elf::start_info::{hvm_memmap_table_entry, hvm_start_info};
+use crate::configurator::{BootConfigurator, BootParams, Error as BootConfiguratorError, Result};
+use crate::loader::elf::start_info::{hvm_memmap_table_entry, hvm_modlist_entry, hvm_start_info};
 
 use std::error::Error as StdError;
 use std::fmt;
@@ -72,41 +72,44 @@ impl From<Error> for BootConfiguratorError {
 
 unsafe impl ByteValued for hvm_start_info {}
 unsafe impl ByteValued for hvm_memmap_table_entry {}
+unsafe impl ByteValued for hvm_modlist_entry {}
 
 impl BootConfigurator for PvhBootConfigurator {
     /// Writes the boot parameters (configured elsewhere) into guest memory.
     ///
     /// # Arguments
     ///
-    /// * `header` - boot parameters encapsulated in a [`hvm_start_info`] struct.
-    /// * `sections` - memory map table represented as a vector of [`hvm_memmap_table_entry`].
+    /// * `params` - boot parameters. The header contains a [`hvm_start_info`] struct. The
+    ///              sections contain the memory map in a vector of [`hvm_memmap_table_entry`]
+    ///              structs. The modules, if specified, contain [`hvm_modlist_entry`] structs.
     /// * `guest_memory` - guest's physical memory.
     ///
-    /// [`hvm_start_info`]: ../loader/elf/start_info/struct.hvm_start_info
+    /// [`hvm_start_info`]: ../loader/elf/start_info/struct.hvm_start_info.html
     /// [`hvm_memmap_table_entry`]: ../loader/elf/start_info/struct.hvm_memmap_table_entry.html
-    fn write_bootparams<T, S, M>(
-        header: (T, GuestAddress),
-        sections: Option<(Vec<S>, GuestAddress)>,
-        guest_memory: &M,
-    ) -> Result<()>
+    /// [`hvm_modlist_entry`]: ../loader/elf/start_info/struct.hvm_modlist_entry.html
+    fn write_bootparams<T, S, R, M>(params: BootParams<T, S, R>, guest_memory: &M) -> Result<()>
     where
         T: ByteValued,
         S: ByteValued,
+        R: ByteValued,
         M: GuestMemory,
     {
         // The VMM has filled an `hvm_start_info` struct and a `Vec<hvm_memmap_table_entry>`
         // and has passed them on to this function.
         // The `hvm_start_info` will be written at `addr` and the memmap entries at
         // `start_info.0.memmap_paddr`.
-        let (memmap_entries, mut memmap_start_addr) = sections.ok_or(Error::MemmapTableMissing)?;
+        let memmap = params.sections.ok_or(Error::MemmapTableMissing)?;
+        let header = params.header;
+
+        let mut memmap_start_addr = memmap.address;
         guest_memory
             .checked_offset(
                 memmap_start_addr,
-                mem::size_of::<hvm_memmap_table_entry>() * memmap_entries.len(),
+                mem::size_of::<hvm_memmap_table_entry>() * memmap.sections.len(),
             )
             .ok_or(Error::MemmapTablePastRamEnd)?;
 
-        for memmap_entry in memmap_entries {
+        for memmap_entry in memmap.sections {
             guest_memory
                 .write_obj(memmap_entry, memmap_start_addr)
                 .map_err(|_| Error::MemmapTableSetup)?;
@@ -115,10 +118,10 @@ impl BootConfigurator for PvhBootConfigurator {
         }
 
         guest_memory
-            .checked_offset(header.1, mem::size_of::<hvm_start_info>())
+            .checked_offset(header.address, mem::size_of::<hvm_start_info>())
             .ok_or(Error::StartInfoPastRamEnd)?;
         guest_memory
-            .write_obj(header.0, header.1)
+            .write_obj(header.header, header.address)
             .map_err(|_| Error::StartInfoSetup)?;
 
         Ok(())
@@ -128,6 +131,7 @@ impl BootConfigurator for PvhBootConfigurator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::loader::elf::start_info::hvm_modlist_entry;
     use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
 
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
@@ -179,8 +183,12 @@ mod tests {
             PvhBootConfigurator::write_bootparams::<
                 hvm_start_info,
                 hvm_memmap_table_entry,
+                hvm_modlist_entry,
                 GuestMemoryMmap,
-            >((start_info, start_info_addr), None, &guest_memory,)
+            >(
+                BootParams::new(start_info, start_info_addr, None, None),
+                &guest_memory,
+            )
             .err(),
             Some(Error::MemmapTableMissing.into())
         );
@@ -193,10 +201,15 @@ mod tests {
             PvhBootConfigurator::write_bootparams::<
                 hvm_start_info,
                 hvm_memmap_table_entry,
+                hvm_modlist_entry,
                 GuestMemoryMmap,
             >(
-                (start_info, bad_start_info_addr),
-                Some((memmap_entries.clone(), memmap_addr)),
+                BootParams::new(
+                    start_info,
+                    bad_start_info_addr,
+                    Some((memmap_entries.clone(), memmap_addr)),
+                    None
+                ),
                 &guest_memory,
             )
             .err(),
@@ -214,10 +227,15 @@ mod tests {
             PvhBootConfigurator::write_bootparams::<
                 hvm_start_info,
                 hvm_memmap_table_entry,
+                hvm_modlist_entry,
                 GuestMemoryMmap,
             >(
-                (start_info, start_info_addr),
-                Some((memmap_entries.clone(), bad_memmap_addr)),
+                BootParams::new(
+                    start_info,
+                    start_info_addr,
+                    Some((memmap_entries.clone(), bad_memmap_addr)),
+                    None
+                ),
                 &guest_memory,
             )
             .err(),
@@ -227,10 +245,15 @@ mod tests {
         assert!(PvhBootConfigurator::write_bootparams::<
             hvm_start_info,
             hvm_memmap_table_entry,
+            hvm_modlist_entry,
             GuestMemoryMmap,
         >(
-            (start_info, start_info_addr),
-            Some((memmap_entries.clone(), memmap_addr)),
+            BootParams::new(
+                start_info,
+                start_info_addr,
+                Some((memmap_entries.clone(), memmap_addr)),
+                None
+            ),
             &guest_memory,
         )
         .is_ok());

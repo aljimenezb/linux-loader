@@ -4,12 +4,12 @@
 
 //! Traits and structs for loading the device tree.
 
-use vm_memory::{ByteValued, Bytes, GuestAddress, GuestMemory};
+use vm_memory::{ByteValued, Bytes, GuestMemory};
 
 use std::error::Error as StdError;
 use std::fmt;
 
-use super::super::{BootConfigurator, Error as BootConfiguratorError, Result};
+use crate::configurator::{BootConfigurator, BootParams, Error as BootConfiguratorError, Result};
 
 /// Errors specific to the device tree boot protocol configuration.
 #[derive(Debug, PartialEq)]
@@ -51,22 +51,18 @@ impl BootConfigurator for FdtBootConfigurator {
     ///
     /// # Arguments
     ///
-    /// * `fdt` - flattened device tree.
-    /// * `sections` - unused.
+    /// * `params` - boot parameters containing the FDT.
     /// * `guest_memory` - guest's physical memory.
-    fn write_bootparams<T, S, M>(
-        fdt: (T, GuestAddress),
-        _sections: Option<(Vec<S>, GuestAddress)>,
-        guest_memory: &M,
-    ) -> Result<()>
+    fn write_bootparams<T, S, R, M>(params: BootParams<T, S, R>, guest_memory: &M) -> Result<()>
     where
         T: ByteValued,
         S: ByteValued,
+        R: ByteValued,
         M: GuestMemory,
     {
         // The VMM has filled an FDT and passed it as a `ByteValued` object.
         guest_memory
-            .write_obj(fdt.0, fdt.1)
+            .write_obj(params.header.header, params.header.address)
             .map_err(|_| Error::WriteFDTToMemory.into())
     }
 }

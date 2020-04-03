@@ -90,27 +90,98 @@ pub trait BootConfigurator {
     ///
     /// # Arguments
     ///
-    /// * `header` - header section of the boot parameters and address where to write it in guest
-    ///              memory. The first element must be a POD struct that implements [`ByteValued`].
-    ///              For the Linux protocol it's the [`boot_params`] struct, and for PVH the
-    ///             [`hvm_start_info`] struct.
-    /// * `sections` - vector of sections that compose the boot parameters and address where to
-    ///                write them in guest memory. Unused for the Linux protocol. For PVH, it's the
-    ///                memory map table represented as a vector of [`hvm_memmap_table_entry`]. Must
-    ///                be a `Vec` of POD data structs that implement [`ByteValued`].
+    /// * `params` - struct containing the header section of the boot parameters, additional
+    ///              sections and modules, and their associated addresses in guest memory. These
+    ///              vary with the boot protocol used.
     /// * `guest_memory` - guest's physical memory.
-    ///
-    /// [`boot_params`]: ../loader/bootparam/struct.boot_e820_entry.html
-    /// [`hvm_memmap_table_entry`]: ../loader/elf/start_info/struct.hvm_memmap_table_entry.html
-    /// [`hvm_start_info`]: ../loader/elf/start_info/struct.hvm_start_info.html
-    /// [`ByteValued`]: https://docs.rs/vm-memory/latest/vm_memory/bytes/trait.ByteValued.html
-    fn write_bootparams<T, S, M>(
-        header: (T, GuestAddress),
-        sections: Option<(Vec<S>, GuestAddress)>,
-        guest_memory: &M,
-    ) -> Result<()>
+    fn write_bootparams<T, S, R, M>(params: BootParams<T, S, R>, guest_memory: &M) -> Result<()>
     where
         T: ByteValued,
         S: ByteValued,
+        R: ByteValued,
         M: GuestMemory;
+}
+
+/// Header section of the boot parameters and associated guest memory address.
+///
+/// For the Linux boot protocol, it contains a [`boot_params`] struct and the zero page address.
+/// For the PVH boot protocol, it contains a [`hvm_start_info`] struct and its address.
+///
+/// [`boot_params`]: ../loader/bootparam/struct.boot_params.html
+/// [`hvm_start_info`]: ../loader/elf/start_info/struct.hvm_start_info.html
+pub struct BootHeader<T: ByteValued> {
+    /// Header section of the boot parameters.
+    pub header: T,
+    /// Address where it will be written in guest memory.
+    pub address: GuestAddress,
+}
+
+/// Sections of the boot parameters and associated guest memory address.
+///
+/// Unused for the Linux boot protocol.
+/// For the PVH boot protocol, they're used to specify both the memory map table in
+/// [`hvm_memmap_table_entry`] structs, and, optionally, boot modules in [`hvm_modlist_entry`]
+/// structs.
+///
+/// [`hvm_memmap_table_entry`]: ../loader/elf/start_info/struct.hvm_memmap_table_entry.html
+/// [`hvm_modlist_entry`]: ../loader/elf/start_info/struct.hvm_modlist_entry.html
+pub struct BootSections<T: ByteValued> {
+    /// Data sections of the boot parameters.
+    pub sections: Vec<T>,
+    /// Address where they will be written in guest memory.
+    pub address: GuestAddress,
+}
+
+/// Boot parameters to be written in guest memory.
+pub struct BootParams<T: ByteValued, S: ByteValued, R: ByteValued> {
+    /// "Header section", always written in guest memory irrespective of boot protocol.
+    pub header: BootHeader<T>,
+    /// Optional sections containing boot configurations (e.g. E820 map).
+    pub sections: Option<BootSections<S>>,
+    /// Optional modules specified at boot configuration time.
+    pub modules: Option<BootSections<R>>,
+}
+
+impl<T, S, R> BootParams<T, S, R>
+where
+    T: ByteValued,
+    S: ByteValued,
+    R: ByteValued,
+{
+    /// Aggregates boot parameters into a [`BootParams`](struct.BootParams.html) struct.
+    ///
+    /// # Arguments
+    ///
+    /// * `header` - [`ByteValued`] representation of mandatory boot parameters.
+    /// * `header_addr` - address in guest memory where `header` will be written.
+    /// * `sections` - optional list of [`ByteValued`] boot configurations and associated address.
+    /// * `modules` - optional list of [`ByteValued`] boot modules and associated address.
+    ///
+    /// [`ByteValued`]: https://docs.rs/vm-memory/latest/vm_memory/bytes/trait.ByteValued.html
+    pub fn new(
+        header: T,
+        header_addr: GuestAddress,
+        sections: Option<(Vec<S>, GuestAddress)>,
+        modules: Option<(Vec<R>, GuestAddress)>,
+    ) -> Self {
+        Self {
+            header: BootHeader {
+                header,
+                address: header_addr,
+            },
+            sections: if let Some((sections, address)) = sections {
+                Some(BootSections { sections, address })
+            } else {
+                None
+            },
+            modules: if let Some((modules, address)) = modules {
+                Some(BootSections {
+                    sections: modules,
+                    address,
+                })
+            } else {
+                None
+            },
+        }
+    }
 }
