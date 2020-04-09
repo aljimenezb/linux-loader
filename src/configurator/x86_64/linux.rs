@@ -99,7 +99,7 @@ mod tests {
     const KERNEL_HDR_MAGIC: u32 = 0x53726448;
     const KERNEL_LOADER_OTHER: u8 = 0xff;
     const KERNEL_MIN_ALIGNMENT_BYTES: u32 = 0x1000000;
-    const MEM_SIZE: u64 = 0x1000000;
+    const MEM_SIZE: u64 = 0x100_0000;
 
     fn create_guest_mem() -> GuestMemoryMmap {
         GuestMemoryMmap::from_ranges(&[(GuestAddress(0x0), (MEM_SIZE as usize))]).unwrap()
@@ -152,5 +152,17 @@ mod tests {
             &guest_memory,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn test_error_messages() {
+        assert_eq!(
+            format!("{}", Error::ZeroPagePastRamEnd),
+            "Linux Boot Configurator Error: The zero page extends past the end of guest memory."
+        );
+        assert_eq!(
+            format!("{}", Error::ZeroPageSetup),
+            "Linux Boot Configurator Error: Error writing to the zero page of guest memory."
+        );
     }
 }

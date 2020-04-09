@@ -43,7 +43,7 @@ impl StdError for Error {
     fn description(&self) -> &str {
         use Error::*;
         match self {
-            MemmapTableMissing => "No memory map wasn't passed to the boot configurator.",
+            MemmapTableMissing => "No memory map was passed to the boot configurator.",
             MemmapTablePastRamEnd => "The memory map table extends past the end of guest memory.",
             MemmapTableSetup => "Error writing memory map table to guest memory.",
             StartInfoPastRamEnd => {
@@ -135,7 +135,7 @@ mod tests {
     use vm_memory::{Address, GuestAddress, GuestMemoryMmap};
 
     const XEN_HVM_START_MAGIC_VALUE: u32 = 0x336ec578;
-    const MEM_SIZE: u64 = 0x1000000;
+    const MEM_SIZE: u64 = 0x100_0000;
     const E820_RAM: u32 = 1;
 
     fn create_guest_mem() -> GuestMemoryMmap {
@@ -257,5 +257,23 @@ mod tests {
             &guest_memory,
         )
         .is_ok());
+    }
+
+    #[test]
+    fn test_error_messages() {
+        assert_eq!(
+            format!("{}", Error::MemmapTableMissing),
+            "PVH Boot Configurator Error: No memory map was passed to the boot configurator."
+        );
+        assert_eq!(format!("{}", Error::MemmapTablePastRamEnd), "PVH Boot Configurator Error: The memory map table extends past the end of guest memory.");
+        assert_eq!(
+            format!("{}", Error::MemmapTableSetup),
+            "PVH Boot Configurator Error: Error writing memory map table to guest memory."
+        );
+        assert_eq!(format!("{}", Error::StartInfoPastRamEnd), "PVH Boot Configurator Error: The hvm_start_info structure extends past the end of guest memory.");
+        assert_eq!(
+            format!("{}", Error::StartInfoSetup),
+            "PVH Boot Configurator Error: Error writing hvm_start_info to guest memory."
+        );
     }
 }

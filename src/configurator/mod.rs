@@ -185,3 +185,55 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_messages() {
+        #[cfg(target_arch = "x86_64")]
+        {
+            // Linux
+            assert_eq!(
+                format!("{}", Error::Linux(linux::Error::ZeroPagePastRamEnd)),
+                "Boot Configurator Error: The zero page extends past the end of guest memory."
+            );
+            assert_eq!(
+                format!("{}", Error::Linux(linux::Error::ZeroPageSetup)),
+                "Boot Configurator Error: Error writing to the zero page of guest memory."
+            );
+
+            // PVH
+            assert_eq!(
+                format!("{}", Error::Pvh(pvh::Error::MemmapTableMissing)),
+                "Boot Configurator Error: No memory map was passed to the boot configurator."
+            );
+            assert_eq!(
+                format!("{}", Error::Pvh(pvh::Error::MemmapTablePastRamEnd)),
+                "Boot Configurator Error: \
+                 The memory map table extends past the end of guest memory."
+            );
+            assert_eq!(
+                format!("{}", Error::Pvh(pvh::Error::MemmapTableSetup)),
+                "Boot Configurator Error: Error writing memory map table to guest memory."
+            );
+            assert_eq!(
+                format!("{}", Error::Pvh(pvh::Error::StartInfoPastRamEnd)),
+                "Boot Configurator Error: \
+                 The hvm_start_info structure extends past the end of guest memory."
+            );
+            assert_eq!(
+                format!("{}", Error::Pvh(pvh::Error::StartInfoSetup)),
+                "Boot Configurator Error: Error writing hvm_start_info to guest memory."
+            );
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        // FDT
+        assert_eq!(
+            format!("{}", Error::Fdt(fdt::Error::WriteFDTToMemory)),
+            "Boot Configurator Error: Error writing FDT in guest memory."
+        );
+    }
+}
