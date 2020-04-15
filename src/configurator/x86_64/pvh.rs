@@ -37,6 +37,10 @@ pub enum Error {
     StartInfoPastRamEnd,
     /// Error writing hvm_start_info to guest memory.
     StartInfoSetup,
+    /// The boot modules list extends past the end of guest memory.
+    BootModlistPastRamEnd,
+    /// Error writing module entry to guest memory.
+    ModlistSetup,
 }
 
 impl StdError for Error {
@@ -50,6 +54,8 @@ impl StdError for Error {
                 "The hvm_start_info structure extends past the end of guest memory."
             }
             StartInfoSetup => "Error writing hvm_start_info to guest memory.",
+            BootModlistPastRamEnd => "The boot modules list extends past the end of guest memory.",
+            ModlistSetup => "Error writing module entry to guest memory.",
         }
     }
 }
@@ -115,6 +121,30 @@ impl BootConfigurator for PvhBootConfigurator {
                 .map_err(|_| Error::MemmapTableSetup)?;
             memmap_start_addr =
                 memmap_start_addr.unchecked_add(mem::size_of::<hvm_memmap_table_entry>() as u64);
+        }
+
+        if let Some(boot_modules) = params.modules {
+            // The boot modules are typically used in the PVH boot protocol to describe the
+            // initramfs, which must be the first module on the list if present. An example
+            // of other type of auxiliary boot module that could be required by the OS
+            // is microcode, although this is normally part of the initramfs.
+            let boot_mod_list = boot_modules.sections;
+            let mut boot_mod_addr = boot_modules.address;
+
+            guest_memory
+                .checked_offset(
+                    boot_mod_addr,
+                    mem::size_of::<hvm_modlist_entry>() * boot_mod_list.len(),
+                )
+                .ok_or(Error::BootModlistPastRamEnd)?;
+
+            for mod_entry in boot_mod_list {
+                guest_memory
+                    .write_obj(mod_entry, boot_mod_addr)
+                    .map_err(|_| Error::ModlistSetup)?;
+                boot_mod_addr =
+                    boot_mod_addr.unchecked_add(mem::size_of::<hvm_modlist_entry>() as u64);
+            }
         }
 
         guest_memory
